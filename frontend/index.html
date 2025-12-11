@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FitLife Gym - Book Your Trial</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💪 FitLife Gym</h1>
+            <p>Your AI fitness consultant is here to help!</p>
+        </div>
+        
+        <div class="chat-container" id="chatContainer">
+            <div class="message bot-message">
+                <div class="message-content">
+                    <strong>Agent:</strong>
+                    <p>Hi there! 👋 Welcome to FitLife Gym! I'm here to help you discover our amazing facilities and book your trial session. What brings you here today?</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="input-container">
+            <div class="intent-indicator" id="intentIndicator">
+                <span class="intent-label">Intent:</span>
+                <span class="intent-value" id="intentValue">-</span>
+            </div>
+            <div class="input-wrapper">
+                <input 
+                    type="text" 
+                    id="userInput" 
+                    placeholder="Type your message here..." 
+                    autocomplete="off"
+                />
+                <button id="sendButton">
+                    <span>Send</span>
+                </button>
+            </div>
+            <button id="resetButton" class="reset-button">
+                🔄 Reset Conversation
+            </button>
+        </div>
+    </div>
+    
+    <script src="/static/script.js"></script>
+</body>
+</html>
