@@ -6,9 +6,10 @@ from langchain.schema import HumanMessage, AIMessage
 
 from app.config import settings
 from app.agents.prompts import MAIN_AGENT_SYSTEM_PROMPT
-from app.tools.intent_classifier import intent_classifier
+from app.tools.intent_classifier_tool import intent_classifier_tool
 from app.tools.calendly_tool import get_availability_tool, book_trial_tool
 from app.tools.gym_info_tool import gym_info_tool
+from app.tools.intent_classifier_tool import intent_classifier
 
 class MainSalesAgent:
     """
@@ -27,7 +28,8 @@ class MainSalesAgent:
         self.tools = [
             get_availability_tool,
             book_trial_tool,
-            gym_info_tool
+            gym_info_tool,
+            intent_classifier_tool
         ]
         
         # Agent prompt with intent awareness
@@ -99,9 +101,10 @@ class MainSalesAgent:
             
             # Step 1: Classify intent
             chat_history_str = self._format_chat_history(session["chat_history"])
-            intent_result = await intent_classifier.classify_intent(
-                user_message=user_message,
-                conversation_history=chat_history_str
+
+            intent_result = await intent_classifier.classify_intent(  # ← Use instance, not tool!
+            user_message=user_message,
+             conversation_history=chat_history_str
             )
             
             # Update session with new intent

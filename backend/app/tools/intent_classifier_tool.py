@@ -1,10 +1,12 @@
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.output_parsers import PydanticOutputParser
+from langchain.tools import Tool
 from app.models.schemas import IntentClassification
 from app.agents.prompts import INTENT_CLASSIFIER_PROMPT
 from app.config import settings
 import json
+import asyncio
 
 class IntentClassifierAgent:
     """
@@ -74,21 +76,49 @@ Latest user message:
                 reasoning="Unable to classify intent, defaulting to medium",
                 key_indicators=["classification_error"]
             )
-    
-    def as_tool_function(self):
-        """
-        Returns a function that can be used as a LangChain tool
-        """
-        async def classify_tool(user_message: str, conversation_history: str = "") -> str:
-            """Classify the intent level of a user's message"""
-            result = await self.classify_intent(user_message, conversation_history)
-            return json.dumps({
-                "intent_level": result.intent_level,
-                "reasoning": result.reasoning,
-                "key_indicators": result.key_indicators
-            })
-        
-        return classify_tool
 
 # Singleton instance
 intent_classifier = IntentClassifierAgent()
+
+# Create SYNC wrapper for the tool
+def classify_intent_sync(input_str: str) -> str:
+    """Synchronous wrapper for intent classification"""
+    try:
+        # Parse input if it's JSON, otherwise use as-is
+        if input_str.startswith('{'):
+            data = json.loads(input_str)
+            user_message = data.get('user_message', input_str)
+            conversation_history = data.get('conversation_history', '')
+        else:
+            user_message = input_str
+            conversation_history = ''
+        
+        # Run async function in sync context
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        result = loop.run_until_complete(
+            intent_classifier.classify_intent(user_message, conversation_history)
+        )
+        
+        return json.dumps({
+            "intent_level": result.intent_level,
+            "reasoning": result.reasoning,
+            "key_indicators": result.key_indicators
+        })
+    except Exception as e:
+        return json.dumps({
+            "intent_level": "medium",
+            "reasoning": f"Error: {str(e)}",
+            "key_indicators": []
+        })
+
+# Create the tool wrapper
+intent_classifier_tool = Tool(
+    name="classify_user_intent",
+    description="Classify user's intent level (high/medium/low) based on their message. Call this first for every user message.",
+    func=classify_intent_sync
+)
