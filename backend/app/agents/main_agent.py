@@ -6,7 +6,7 @@ from langchain.schema import HumanMessage, AIMessage
 
 from app.config import settings
 from app.agents.prompts import MAIN_AGENT_SYSTEM_PROMPT
-from app.agents.intent_classifier import intent_classifier
+from app.tools.intent_classifier import intent_classifier
 from app.tools.calendly_tool import get_availability_tool, book_trial_tool
 from app.tools.gym_info_tool import gym_info_tool
 
@@ -52,7 +52,7 @@ class MainSalesAgent:
             tools=self.tools,
             verbose=True,
             handle_parsing_errors=True,
-            max_iterations=5
+            max_iterations=15
         )
         
         # Session storage (in production, use Redis or similar)
