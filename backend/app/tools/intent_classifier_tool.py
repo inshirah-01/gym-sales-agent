@@ -16,7 +16,7 @@ class IntentClassifierAgent:
     
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o-mini",
+            model="gpt-5.1",
             temperature=0,
             openai_api_key=settings.openai_api_key
         )

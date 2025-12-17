@@ -1,7 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain.agents import AgentExecutor, create_openai_functions_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.memory import ConversationBufferMemory
 from langchain.schema import HumanMessage, AIMessage
 
 from app.config import settings
@@ -9,12 +8,11 @@ from app.agents.prompts import MAIN_AGENT_SYSTEM_PROMPT
 from app.tools.intent_classifier_tool import intent_classifier_tool
 from app.tools.calendly_tool import get_availability_tool, book_trial_tool
 from app.tools.gym_info_tool import gym_info_tool
-from app.tools.intent_classifier_tool import intent_classifier
 
 class MainSalesAgent:
     """
     Main sales agent that handles all user interactions
-    Uses intent classification to adapt behavior dynamically
+    Agent calls intent_classifier_tool to adapt behavior dynamically
     """
     
     def __init__(self):
@@ -26,17 +24,15 @@ class MainSalesAgent:
         
         # Tools available to the agent
         self.tools = [
+            intent_classifier_tool,  # Agent will call this first
             get_availability_tool,
             book_trial_tool,
-            gym_info_tool,
-            intent_classifier_tool
+            gym_info_tool
         ]
         
-        # Agent prompt with intent awareness
+        # Agent prompt - intent will be determined by tool call
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", MAIN_AGENT_SYSTEM_PROMPT),
-            ("system", "Current user intent level: {intent_level}"),
-            ("system", "Intent reasoning: {intent_reasoning}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad")
@@ -54,7 +50,8 @@ class MainSalesAgent:
             tools=self.tools,
             verbose=True,
             handle_parsing_errors=True,
-            max_iterations=15
+            max_iterations=20,
+            return_intermediate_steps=True
         )
         
         # Session storage (in production, use Redis or similar)
@@ -65,24 +62,10 @@ class MainSalesAgent:
         if session_id not in self.sessions:
             self.sessions[session_id] = {
                 "chat_history": [],
-                "last_intent": "low",
+                "last_intent": "unknown",
                 "user_info": {}
             }
         return self.sessions[session_id]
-    
-    def _format_chat_history(self, chat_history: list) -> str:
-        """Format chat history as string for intent classifier"""
-        if not chat_history:
-            return ""
-        
-        formatted = []
-        for msg in chat_history[-6:]:  # Last 3 exchanges
-            if isinstance(msg, HumanMessage):
-                formatted.append(f"User: {msg.content}")
-            elif isinstance(msg, AIMessage):
-                formatted.append(f"Agent: {msg.content}")
-        
-        return "\n".join(formatted)
     
     async def process_message(self, user_message: str, session_id: str) -> dict:
         """
@@ -99,33 +82,32 @@ class MainSalesAgent:
             # Get or create session
             session = self._get_or_create_session(session_id)
             
-            # Step 1: Classify intent
-            chat_history_str = self._format_chat_history(session["chat_history"])
-
-            intent_result = await intent_classifier.classify_intent(  # ← Use instance, not tool!
-            user_message=user_message,
-             conversation_history=chat_history_str
-            )
-            
-            # Update session with new intent
-            session["last_intent"] = intent_result.intent_level
-            
             print(f"\n{'='*50}")
             print(f"[MAIN AGENT] Processing message for session: {session_id}")
             print(f"[MAIN AGENT] User message: {user_message}")
-            print(f"[MAIN AGENT] Classified intent: {intent_result.intent_level}")
-            print(f"[MAIN AGENT] Intent reasoning: {intent_result.reasoning}")
             print(f"{'='*50}\n")
             
-            # Step 2: Run main agent with intent context
+            # Agent will call intent_classifier_tool as first action
             response = await self.agent_executor.ainvoke({
                 "input": user_message,
-                "chat_history": session["chat_history"],
-                "intent_level": intent_result.intent_level.upper(),
-                "intent_reasoning": intent_result.reasoning
+                "chat_history": session["chat_history"]
             })
             
-            # Step 3: Update chat history
+            # Extract intent from intermediate steps if available
+            intent_level = "unknown"
+            if response.get("intermediate_steps"):
+                for action, observation in response["intermediate_steps"]:
+                    if action.tool == "classify_user_intent":
+                        try:
+                            import json
+                            intent_data = json.loads(observation)
+                            intent_level = intent_data.get("intent_level", "unknown")
+                            session["last_intent"] = intent_level
+                            print(f"[INTENT DETECTED] {intent_level}")
+                        except:
+                            pass
+            
+            # Update chat history
             session["chat_history"].append(HumanMessage(content=user_message))
             session["chat_history"].append(AIMessage(content=response["output"]))
             
@@ -134,21 +116,24 @@ class MainSalesAgent:
                 session["chat_history"] = session["chat_history"][-10:]
             
             # Check if booking was made
-            booking_made = "booking" in response["output"].lower() and "confirmed" in response["output"].lower()
+            booking_made = "booked" in response["output"].lower() or "confirmed" in response["output"].lower()
             
             return {
                 "response": response["output"],
                 "session_id": session_id,
-                "intent_level": intent_result.intent_level,
+                "intent_level": intent_level,
                 "booking_made": booking_made
             }
             
         except Exception as e:
             print(f"Error processing message: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
             return {
-                "response": "I apologize, I encountered an error. Could you please rephrase your message?",
+                "response": "I apologize, I encountered a technical issue. Could you please try again?",
                 "session_id": session_id,
-                "intent_level": "low",
+                "intent_level": "unknown",
                 "booking_made": False,
                 "error": str(e)
             }
