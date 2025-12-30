@@ -8,6 +8,8 @@ from app.agents.prompts import MAIN_AGENT_SYSTEM_PROMPT
 from app.tools.intent_classifier_tool import intent_classifier_tool
 from app.tools.calendly_tool import get_availability_tool, book_trial_tool
 from app.tools.gym_info_tool import gym_info_tool
+from app.tools.memory_tool import memory_update_tool
+from app.services.mongodb_service import mongodb_service
 
 class MainSalesAgent:
     """
@@ -25,6 +27,7 @@ class MainSalesAgent:
         # Tools available to the agent
         self.tools = [
             intent_classifier_tool,  # Agent will call this first
+            memory_update_tool,    
             get_availability_tool,
             book_trial_tool,
             gym_info_tool
@@ -33,6 +36,7 @@ class MainSalesAgent:
         # Agent prompt - intent will be determined by tool call
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", MAIN_AGENT_SYSTEM_PROMPT),
+            ("system", "CURRENT LEAD PROFILE:\n{memory_context}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad")
@@ -63,37 +67,92 @@ class MainSalesAgent:
             self.sessions[session_id] = {
                 "chat_history": [],
                 "last_intent": "unknown",
-                "user_info": {}
+                "user_info": {},
+                "message_count": 0
             }
         return self.sessions[session_id]
     
-    async def process_message(self, user_message: str, session_id: str) -> dict:
-        """
-        Process a user message and return response
+    def _format_chat_history(self, chat_history: list) -> str:
+        """Format chat history as string"""
+        if not chat_history:
+            return "No previous conversation"
         
-        Args:
-            user_message: The user's message
-            session_id: Session identifier
+        formatted = []
+        for msg in chat_history[-6:]:  # Last 3 exchanges
+            if isinstance(msg, HumanMessage):
+                formatted.append(f"User: {msg.content}")
+            elif isinstance(msg, AIMessage):
+                formatted.append(f"Agent: {msg.content}")
+        
+        return "\n".join(formatted)
+    
+    async def _load_memory_context(self, session_id: str) -> str:
+        """Load memory from MongoDB and format for agent context"""
+        try:
+            memory = await mongodb_service.get_memory(session_id)
             
-        Returns:
-            Dictionary with response and metadata
-        """
+            if not memory:
+                return "New lead - no previous information."
+            
+            # Check if this is actually a new lead (all Unknown)
+            is_new = all(
+                memory.get(field) in ["Unknown", "None", "unknown"]
+                for field in ["fitness_goals", "past_experience", "location_proximity", 
+                             "joining_timeline", "motivation", "preferred_time"]
+            )
+            
+            if is_new:
+                return "New lead - no previous information."
+            
+            # Format memory for agent
+            context = f"""
+Fitness Goals: {memory.get('fitness_goals', 'Unknown')}
+Past Experience: {memory.get('past_experience', 'Unknown')}
+Location: {memory.get('location_proximity', 'Unknown')}
+Timeline: {memory.get('joining_timeline', 'Unknown')}
+Motivation: {memory.get('motivation', 'Unknown')}
+Preferred Time: {memory.get('preferred_time', 'Unknown')}
+Health Info: {memory.get('health_physical_info', 'Unknown')}
+Objections: {memory.get('objections', 'None')}
+
+Additional Context: {memory.get('conversation_summary', 'None')}
+
+💡 Use this information to personalize your conversation. Don't ask for details we already know!
+"""
+            
+            print(f"✅ Loaded memory for session: {session_id}")
+            return context
+            
+        except Exception as e:
+            print(f"Error loading memory: {str(e)}")
+            return "New lead - no previous information."
+    
+    async def process_message(self, user_message: str, session_id: str) -> dict:
+        """Process a user message with memory support"""
         try:
             # Get or create session
             session = self._get_or_create_session(session_id)
+            session["message_count"] += 1
+            
+            # Load memory context
+            memory_context = await self._load_memory_context(session_id)
             
             print(f"\n{'='*50}")
-            print(f"[MAIN AGENT] Processing message for session: {session_id}")
-            print(f"[MAIN AGENT] User message: {user_message}")
+            print(f"[MAIN AGENT] Session: {session_id}")
+            print(f"[MAIN AGENT] Message #{session['message_count']}: {user_message}")
             print(f"{'='*50}\n")
             
-            # Agent will call intent_classifier_tool as first action
+            # Agent processes with memory context
+            # Add session_id to input so agent can use it in tool calls
+            enriched_input = f"[Session ID: {session_id}]\n{user_message}"
+
             response = await self.agent_executor.ainvoke({
-                "input": user_message,
-                "chat_history": session["chat_history"]
+                         "input": enriched_input,
+                         "chat_history": session["chat_history"],
+                         "memory_context": memory_context
             })
             
-            # Extract intent from intermediate steps if available
+            # Extract intent from intermediate steps
             intent_level = "unknown"
             if response.get("intermediate_steps"):
                 for action, observation in response["intermediate_steps"]:
@@ -103,7 +162,7 @@ class MainSalesAgent:
                             intent_data = json.loads(observation)
                             intent_level = intent_data.get("intent_level", "unknown")
                             session["last_intent"] = intent_level
-                            print(f"[INTENT DETECTED] {intent_level}")
+                            print(f"[INTENT] {intent_level}")
                         except:
                             pass
             
@@ -111,7 +170,7 @@ class MainSalesAgent:
             session["chat_history"].append(HumanMessage(content=user_message))
             session["chat_history"].append(AIMessage(content=response["output"]))
             
-            # Keep only last 10 messages to prevent context overflow
+            # Keep only last 10 messages
             if len(session["chat_history"]) > 10:
                 session["chat_history"] = session["chat_history"][-10:]
             
@@ -122,7 +181,8 @@ class MainSalesAgent:
                 "response": response["output"],
                 "session_id": session_id,
                 "intent_level": intent_level,
-                "booking_made": booking_made
+                "booking_made": booking_made,
+                "message_count": session["message_count"]
             }
             
         except Exception as e:

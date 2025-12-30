@@ -27,3 +27,24 @@ class BookingResponse(BaseModel):
     booking_url: Optional[str] = None
     scheduled_time: Optional[str] = None
     message: str
+
+
+class LeadMemory(BaseModel):
+    """Structured lead memory"""
+    fitness_goals: str = "Unknown"
+    past_experience: str = "Unknown"
+    location_proximity: str = "Unknown"
+    joining_timeline: str = "Unknown"
+    motivation: str = "Unknown"
+    preferred_time: str = "Unknown"
+    health_physical_info: str = "Unknown"
+    objections: str = "None"
+    conversation_summary: str = "None"
+    total_messages: int = 0
+    last_intent: str = "unknown"
+
+class MemoryUpdateRequest(BaseModel):
+    """Memory update request from main agent"""
+    session_id: str
+    user_message: str
+    agent_response: str

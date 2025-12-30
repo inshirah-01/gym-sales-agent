@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     calendly_api_token: str
     calendly_event_type_uri: str
     
+    # MongoDB
+    mongodb_url: str
+    mongodb_database: str = "gym_sales_db"  
+    
     # Gym Info
     gym_name: str = "FitLife Gym"
     gym_trial_price: int = 99
