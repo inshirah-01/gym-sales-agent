@@ -3,7 +3,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 async def test_connection():
     # Replace with your connection string
-    MONGODB_URL = "mongodb+srv://gym_agent:Hello.world@cluster0.x6cjmmx.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+    MONGODB_URL = "url_to_your_mongodb_instance"
     
     try:
         print("Connecting to MongoDB...")
